@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NYC Charter Schools Map</title>
+<meta name="description" content="Interactive map of every New York City charter school location, with Success Academy schools highlighted.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="NYC Charter Schools Map">
+<meta property="og:description" content="Every charter school location in New York City, with Success Academy highlighted. Search, filter by borough, explore.">
+<meta name="theme-color" content="#24364f">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%233b6fb6'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23e8590c' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" integrity="sha384-pmjIAcz2bAn0xukfxADbZIb3t8oRT9Sv0rvO+BR5Csr6Dhqq+nZs59P0pPKQJkEV" crossorigin="anonymous">
+<style>
+  :root {
+    --ink: #1b2430;
+    --muted: #5b6675;
+    --line: #dfe4ea;
+    --bg: #ffffff;
+    --soft: #f4f6f9;
+    --school: #3b6fb6;      /* all other charter schools */
+    --sa: #e8590c;          /* Success Academy */
+    --cluster: #24364f;
+    --radius: 10px;
+    --shadow: 0 4px 18px rgba(20, 30, 45, .18);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--soft);
+  }
+  #map { position: absolute; inset: 0; }
+
+  /* ---------- control panel ---------- */
+  .panel {
+    position: absolute; z-index: 1050; top: 12px; left: 12px;   /* above Leaflet's own controls (1000) now that the map comes later in the page */
+    width: 320px; max-height: calc(100% - 24px); overflow: auto;
+    background: var(--bg); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 16px;
+  }
+  .panel { display: flex; flex-direction: column; }
+  .panel > * { flex: none; }
+  .panel h1 { font-size: 17px; line-height: 1.25; margin: 0 0 2px; letter-spacing: -.01em; }
+  .panel .sub { margin: 0 0 10px; color: var(--ink); font-size: 13px; line-height: 1.4; }
+  .topline { margin: 2px 0 2px; font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+  .byline { margin: 2px 0 4px; font-size: 11.5px; color: var(--muted); }
+  .panel-toggle { display: none; }
+
+  label.field { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
+  input[type="search"], select {
+    width: 100%; height: 40px; padding: 0 12px; font: inherit; color: var(--ink);
+    background: #fff; border: 1px solid var(--line); border-radius: 8px;
+  }
+  select { appearance: auto; }
+  input[type="search"]:focus, select:focus, button:focus-visible, .about summary:focus-visible, .switch input:focus-visible + .track {
+    outline: 2px solid var(--school); outline-offset: 1px;
+  }
+
+  .switch { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; cursor: pointer; user-select: none; }
+  .switch input { position: absolute; opacity: 0; }
+  .switch .track { flex: none; width: 38px; height: 22px; border-radius: 11px; background: #c5ccd6; position: relative; transition: background .15s; }
+  .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .switch input:checked + .track { background: var(--sa); }
+  .switch input:checked + .track::after { transform: translateX(16px); }
+  .switch .txt { font-weight: 600; }
+
+  .status { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .status[hidden] { display: none; }
+  .status .count { font-size: 13px; font-weight: 600; color: var(--school); }
+  button.reset { font: inherit; font-size: 13px; color: var(--school); background: none; border: 0; padding: 4px 6px; cursor: pointer; border-radius: 6px; }
+  button.reset:hover { background: var(--soft); }
+  .empty { display: none; margin-top: 8px; padding: 8px 10px; background: #fff6ec; border: 1px solid #f6d3b0; border-radius: 8px; color: #7a3d0b; font-size: 13px; }
+  .empty.show { display: block; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; vertical-align: -3px; margin-right: 6px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+  .legend .sa i { width: 16px; height: 16px; background: var(--sa); }
+  .legend .other i { width: 12px; height: 12px; background: var(--school); margin-left: 2px; margin-right: 8px; }
+
+  .about { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .about summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--school); list-style: none; border-radius: 4px; }
+  .about summary::-webkit-details-marker { display: none; }
+  .about summary::before { content: "\25B8"; font-size: 11px; transition: transform .15s; }
+  .about[open] summary::before { transform: rotate(90deg); }
+  .about ul { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+  .about li { margin: 0 0 6px; }
+  .about ul ul { margin-top: 4px; }
+  .about a { color: inherit; }
+
+  .load-error { position: absolute; z-index: 1100; inset: 40% 16px auto 16px; margin: auto; max-width: 440px; padding: 16px; background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); }
+
+  /* ---------- markers ---------- */
+  .pin { border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.3), 0 1px 4px rgba(0,0,0,.25); }
+  .pin.other { background: var(--school); }
+  .pin.sa { background: var(--sa); box-shadow: 0 0 0 1px rgba(0,0,0,.35), 0 0 0 5px rgba(232,89,12,.25), 0 1px 4px rgba(0,0,0,.3); }
+  .leaflet-marker-icon:focus-visible .pin { outline: 3px solid #111; outline-offset: 2px; }
+  .cl { display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; background: var(--cluster); border: 3px solid rgba(255,255,255,.95); border-radius: 50%; box-shadow: 0 1px 6px rgba(0,0,0,.35); font-size: 13px; }
+
+  /* ---------- popup ---------- */
+  .leaflet-popup-content-wrapper { border-radius: 12px; }
+  .leaflet-popup-content { margin: 14px 16px; min-width: 220px; line-height: 1.45; }
+  .pop h2 { font-size: 15px; line-height: 1.3; margin: 0 0 6px; padding-right: 8px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--muted); }
+  .badge.sa { background: #c2410c; color: #fff; }   /* darker than the marker orange so white text passes WCAG AA (5.2:1) */
+  .badge.new { background: #e6f0fb; color: #24527f; }
+  .pop dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; }
+  .pop dt { color: var(--muted); }
+  .pop dd { margin: 0; }
+  .pop .maplink { display: inline-block; margin-top: 10px; font-weight: 600; color: var(--school); text-decoration: none; }
+  .pop .maplink:hover { text-decoration: underline; }
+
+  /* ---------- mobile ---------- */
+  @media (max-width: 640px) {
+    .panel { top: 8px; left: 8px; right: 8px; width: auto; padding: 12px; max-height: 70%; }
+    .panel h1 { font-size: 16px; }
+    .panel { padding: 10px 12px; }
+    .panel .sub { font-size: 12.5px; margin-bottom: 6px; }
+    button.reset { padding: 10px 8px; margin: -6px -4px; }   /* bigger tap target without growing the row */
+    .byline { margin: 0 0 8px; }
+    label[for="q"] { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); }  /* placeholder says it; the label stays for screen readers */
+    .panel-toggle { display: inline-block; order: 1; margin: 6px 12px 0 0; font: inherit; font-size: 13px; font-weight: 600; color: var(--school); background: var(--soft); border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+    /* On phones the panel is a wrapping row so "Filters & legend" and "About this data" share one line; opening About gives it a full row */
+    .panel { flex-direction: row; flex-wrap: wrap; align-items: center; }
+    .panel > * { flex: 0 0 100%; }
+    .panel-toggle, .about { flex: 0 0 auto; }
+    .about[open] { flex: 0 0 100%; }
+    .about { order: 2; margin-top: 6px; padding-top: 0; border-top: 0; }
+    .about[open] { padding-top: 8px; }
+    .more { order: 3; }
+    input[type="search"] { height: 38px; }
+    .panel.collapsed .more { display: none; }
+    .leaflet-bottom.leaflet-right { margin-bottom: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Panel comes first in the page so keyboard users reach search and filters before the (many) map markers -->
+<aside class="panel" id="panel">
+  <h1>NYC Charter Schools</h1>
+  <p class="sub">Every charter school location in New York City, with Success Academy highlighted</p>
+  <p class="topline" id="topline">Loading…</p>
+  <div class="status" id="status" hidden>
+    <div class="count" id="count" aria-live="polite"></div>
+    <button class="reset" id="reset" type="button">Reset</button>
+  </div>
+  <div class="empty" id="empty">No schools match. Try a different search or clear the filters.</div>
+  <p class="byline">Built by Will Murray &middot; Data as of Nov 12, 2026</p>
+
+  <label class="field" for="q">Search</label>
+  <input id="q" type="search" placeholder="School name, address or ZIP" autocomplete="off">
+
+  <button class="panel-toggle" id="panelToggle" type="button" aria-expanded="false" aria-controls="more">Filters &amp; legend</button>
+
+  <div class="more" id="more">
+    <label class="field" for="borough">Borough</label>
+    <select id="borough"><option value="">All boroughs</option></select>
+
+    <label class="switch">
+      <input type="checkbox" id="saOnly">
+      <span class="track" aria-hidden="true"></span>
+      <span class="txt">Success Academy only</span>
+    </label>
+
+    <div class="legend">
+      <span class="sa"><i></i>Success Academy</span>
+      <span class="other"><i></i>Other charter school</span>
+    </div>
+  </div>
+
+  <details class="about" id="about">
+    <summary>About this data</summary>
+    <ul>
+      <li>Source: <a href="https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Schools/FeatureServer/4" target="_blank" rel="noopener">NYS Education Department charter school locations</a>, downloaded Nov 12, 2026</li>
+      <li><span id="aboutSchools">&ndash;</span> charter schools at <span id="aboutLocations">&ndash;</span> locations: <span id="aboutCampuses">&ndash;</span> of the locations are extra campuses of those schools. Popups say which is which.</li>
+      <li><span id="aboutSA">&ndash;</span> Success Academy locations on the map (larger, in orange), plus <span id="aboutSANotOpen">&ndash;</span> approved schools not yet open (NYC 15 and NYC 18). The state groups the <span id="aboutSA2">&ndash;</span> locations under <span id="aboutSARecords">&ndash;</span> school records and lists the rest as extra campuses.</li>
+      <li>Data checks: <span id="aboutLeftOff">&ndash;</span> schools from the state&rsquo;s list are left off (one is really in Albany; two Success Academy schools, NYC 15 and NYC 18, are not open yet). <span id="aboutMoved">&ndash;</span> pins were moved to the right spot, including NYC 17, a new school the state places at the network&rsquo;s office instead of its Ridgewood, Queens site. Boroughs come from ZIP codes because the state&rsquo;s file has <span id="aboutCounty">&ndash;</span> schools in the wrong one.</li>    </ul>
+  </details>
+</aside>
+
+<div id="map" role="application" aria-label="Map of NYC charter schools"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha384-eXVCORTRlv4FUUgS/xmOyr66XBVraen8ATNLMESp92FKXLAMiKkerixTiBvXriZr" crossorigin="anonymous"></script>
+<script>
+(function () {
+  'use strict';
+
+  var DATA_URL = 'data/nyc-charter-schools.geojson';
+
+  // ---- Documented fixes applied on top of the unmodified download (see README, "Data notes") ----
+  // Minisink Charter School: the record carries an Albany address and Albany coordinates, so it is not an NYC location.
+  // Success Academy NYC 15 and NYC 18: not yet open and no school site is listed anywhere (SUNY lists enrollment 0 for 2026-27
+  // and no street address), and the state file only carries a network office address (20 Jay St / 95 Pine St), so there is
+  // nothing real to plot.
+  var EXCLUDE = { '800000076140': true, '800000074916': true, '800000093529': true };
+  // Records whose coordinates disagree with their own listed address by about a kilometre or more. Positions come from
+  // NYC Planning's address lookup (geosearch.planninglabs.nyc) for that same address.
+  var COORD_FIX = {
+    '800000082487': [40.68857, -73.97145],  // Compass Charter School, 300 Adelphi St, Brooklyn (marker was in Lower Manhattan)
+    '800000076138': [40.71064, -73.88855]   // Middle Village Preparatory, 68-02 Metropolitan Ave, Queens (marker was ~1 km west)
+  };
+  // Success Academy NYC 17: the state file lists the network office (95 Pine St, Manhattan) with a marker in East New York,
+  // neither of which is the school. SUNY Charter Schools Institute lists its school site as Ridgewood Kindergarten,
+  // 58-23 Catalpa Ave, Queens 11385 (Queens CSD 24). Position from NYC Planning's address lookup for that address.
+  var SITE_FIX = {
+    '800000093528': { lat: 40.70232, lon: -73.90232, address: '58-23 Catalpa Ave', city: 'Ridgewood', zip: '11385', district: 'District 24', note: 'New school' }
+  };
+  var COUNTY_BOROUGH = { 'BRONX': 'Bronx', 'KINGS': 'Brooklyn', 'NEW YORK': 'Manhattan', 'QUEENS': 'Queens', 'RICHMOND': 'Staten Island' };
+
+  var BOROUGH_ORDER = ['Manhattan', 'Bronx', 'Brooklyn', 'Queens', 'Staten Island'];
+
+  // The data's COUNTY field is the charter's authorizing county and is wrong for several schools,
+  // so the borough comes from the school's ZIP code instead.
+  function boroughFromZip(zip) {
+    var p = String(zip || '').slice(0, 3);
+    if (p === '100' || p === '101' || p === '102') return 'Manhattan';
+    if (p === '103') return 'Staten Island';
+    if (p === '104') return 'Bronx';
+    if (p === '112') return 'Brooklyn';
+    if (p === '110' || p === '111' || p === '113' || p === '114' || p === '116') return 'Queens';
+    return '';
+  }
+
+  // ---------- text helpers ----------
+  var KEEP_UPPER = { 'NYC': 1, 'KIPP': 1, 'CS': 1, 'CHS': 1, 'HS': 1, 'MS': 1, 'ES': 1, 'PS': 1, 'II': 1, 'III': 1, 'IV': 1,
+    'STEM': 1, 'AECI': 1, 'UA': 1, 'BX': 1, 'FL': 1, 'RM': 1, 'STE': 1, 'E': 1, 'W': 1, 'N': 1, 'S': 1, 'NE': 1, 'NW': 1, 'SE': 1, 'SW': 1, 'LES': 1 };
+  var SMALL = { 'OF': 1, 'THE': 1, 'AND': 1, 'FOR': 1, 'AT': 1, 'IN': 1, 'A': 1 };
+  // display-only fixes for typos in the source names
+  var WORD_FIX = { 'ACAD': 'Academy', 'ACHIVEMENT': 'Achievement', 'ACADEMY0OZONE': 'Academy Ozone', 'RODRGUEZ-REMENESKI': 'Rodriguez-Remeneski' };
+
+  // one hyphen-separated piece of an ALL CAPS word
+  function casePart(p) {
+    var core = p.replace(/^\(+|[):,]+$/g, '');
+    if (/^\d+(ST|ND|RD|TH)$/.test(core)) return p.toLowerCase();                           // 4TH -> 4th
+    if (KEEP_UPPER[core] || /^\d+[A-Z]$|^[A-Z]\d+$/.test(core)) return p;                  // acronyms, unit numbers like 327A, D109
+    return p.toLowerCase().replace(/(^|[(\/])([a-z])/g, function (m, a, b) { return a + b.toUpperCase(); });
+  }
+  function titleCase(s, isName) {
+    return String(s || '').replace(/\s+/g, ' ').trim().split(' ').map(function (w, i) {
+      var up = w.toUpperCase();
+      if (isName && WORD_FIX[up]) return WORD_FIX[up];
+      if (/^\([A-Z]{2,6}\)$/.test(up) && up !== '(THE)') return up;                        // "(CP)", "(EBACS)"
+      if (isName && i > 0 && SMALL[up]) return up.toLowerCase();
+      return up.split('-').map(casePart).join('-');                                         // "School-NYC", "MS-Law"
+    }).join(' ');
+  }
+  // the state writes unit numbers after a hyphen ("99 TERRACE VIEW AVE-RM 254", "300 ADELPHI-4TH FL") and "E138TH ST"
+  function cleanAddress(a) {
+    return String(a || '')
+      .replace(/-(?=(?:\d+(?:ST|ND|RD|TH)\s+)?(?:FL|FLOOR|RM|STE|BLDG|TRAILER|LOWER|CORPORATE)\b)/gi, ', ')
+      .replace(/\b([EW])(?=\d)/g, '$1 ');
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+
+  // ---------- map ----------
+  var map = L.map('map', { zoomControl: false, maxZoom: 19, minZoom: 9 });
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  map.setView([40.7, -73.97], 11);
+  var cluster = L.markerClusterGroup({
+    showCoverageOnHover: false, maxClusterRadius: 45, spiderfyOnMaxZoom: true, chunkedLoading: true,
+    iconCreateFunction: function (c) {
+      var n = c.getChildCount(), d = n < 10 ? 34 : n < 50 ? 40 : 46;
+      return L.divIcon({ html: '<div class="cl" style="width:' + d + 'px;height:' + d + 'px">' + n + '</div>',
+        className: '', iconSize: [d, d] });
+    }
+  });
+  map.addLayer(cluster);
+  // Success Academy pins are never clustered: they live in their own layer, in a pane drawn above the clusters,
+  // so every one is visible at every zoom
+  map.createPane('sa').style.zIndex = 640;   // above markers (600), below popups (700)
+  var saLayer = L.layerGroup().addTo(map);
+
+  // ---------- state ----------
+  var schools = [];       // normalised records
+  var els = {
+    q: document.getElementById('q'), borough: document.getElementById('borough'), saOnly: document.getElementById('saOnly'),
+    count: document.getElementById('count'), empty: document.getElementById('empty'), reset: document.getElementById('reset'),
+    status: document.getElementById('status'), topline: document.getElementById('topline'), about: document.getElementById('about'),
+    panel: document.getElementById('panel'), toggle: document.getElementById('panelToggle')
+  };
+
+  function popupHtml(s) {
+    var badges = '';
+    if (s.sa) badges += '<span class="badge sa">Success Academy</span>';
+    badges += '<span class="badge">' + (s.isSite ? 'Additional campus site' : 'Charter school') + '</span>';
+    if (s.note) badges += '<span class="badge new">' + esc(s.note) + '</span>';
+    return '<div class="pop"><h2>' + esc(s.name) + '</h2><div class="badges">' + badges + '</div><dl>' +
+      '<dt>Address</dt><dd>' + esc(s.address) + '<br>' + esc(s.city) + ', NY ' + esc(s.zip) + '</dd>' +
+      '<dt>Borough</dt><dd>' + esc(s.borough) + '</dd>' +
+      (s.district ? '<dt>District</dt><dd>' + esc(s.district) + '</dd>' : '') +
+      '<dt>NYSED code</dt><dd>' + esc(s.sedCode) + '</dd></dl>' +
+      '<a class="maplink" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=' + s.lat + ',' + s.lon + '">Open in Google Maps &rarr;</a></div>';
+  }
+
+  // offset: [dx, dy] in pixels, so Success Academy schools that share an address sit side by side instead of on top of each other
+  function makeMarker(s, offset) {
+    var size = s.sa ? 22 : 14, dx = offset ? offset[0] : 0, dy = offset ? offset[1] : 0;
+    var m = L.marker([s.lat, s.lon], {
+      icon: L.divIcon({ className: '', html: '<div class="pin ' + (s.sa ? 'sa' : 'other') + '" style="width:' + size + 'px;height:' + size + 'px"></div>',
+        iconSize: [size, size], iconAnchor: [size / 2 - dx, size / 2 - dy], popupAnchor: [dx, dy] }),
+      title: s.name, alt: s.name, riseOnHover: true, pane: s.sa ? 'sa' : 'markerPane'
+    });
+    m._school = s;
+    m.on('click', function () { reservePanelSpace(m.getPopup()); });   // registered before bindPopup so it runs before the popup opens
+    m.bindPopup(popupHtml(s), { maxWidth: 300, autoPan: true });
+    return m;
+  }
+
+  function load(geo) {
+    geo.features.forEach(function (f) {
+      var p = f.properties, id = String(p.INSTIT_ID);
+      if (EXCLUDE[id]) return;
+      var lat = f.geometry.coordinates[1], lon = f.geometry.coordinates[0];
+      if (COORD_FIX[id]) { lat = COORD_FIX[id][0]; lon = COORD_FIX[id][1]; }
+      var site = SITE_FIX[id];
+      if (site) { lat = site.lat; lon = site.lon; }
+      var name = titleCase(p.LEGAL_NAME, true);
+      var zip = site ? site.zip : p.PHYSZIPCD5;
+      var s = {
+        id: id, name: name, lat: lat, lon: lon,
+        address: site ? site.address : titleCase(cleanAddress(p.PHYSADDRLINE1)),
+        city: site ? site.city : titleCase(p.PHYSCITY), zip: zip,
+        borough: boroughFromZip(zip), county: p.COUNTY_DESC, note: site ? site.note : '',
+        district: site ? site.district : ((/(\d+)/.exec(p.SDL_DESC || '') || [])[1] ? 'District ' + /(\d+)/.exec(p.SDL_DESC)[1] : ''),
+        sedCode: p.SED_CODE, isSite: p.INSTSUBTYPDESC === 'SATELLITE SITE FOR CHARTER SCHOOLS',
+        sa: /^SUCCESS ACAD/i.test(p.LEGAL_NAME)
+      };
+      s.hay = norm([p.LEGAL_NAME, p.POPULAR_NAME, name, site ? '' : p.PHYSADDRLINE1, s.address, s.zip, s.borough, s.city, s.note].join(' '));
+      schools.push(s);
+    });
+
+    // Unclustered Success Academy pins at the same spot are fanned out in a small ring so each one can be clicked
+    var spots = {};
+    schools.forEach(function (s) {
+      if (!s.sa) return;
+      var k = s.lat.toFixed(4) + ',' + s.lon.toFixed(4);
+      (spots[k] = spots[k] || []).push(s);
+    });
+    schools.forEach(function (s) {
+      var group = s.sa ? spots[s.lat.toFixed(4) + ',' + s.lon.toFixed(4)] : null, offset = null;
+      if (group && group.length > 1) {
+        var a = 2 * Math.PI * group.indexOf(s) / group.length - Math.PI / 2;
+        offset = [Math.round(12 * Math.cos(a)), Math.round(12 * Math.sin(a))];
+      }
+      s.marker = makeMarker(s, offset);
+    });
+
+    var total = schools.length, mainCount = schools.filter(function (s) { return !s.isSite; }).length;
+    els.topline.textContent = mainCount + ' charter schools · ' + total + ' locations';
+    // the "About this data" numbers are computed from the data so they cannot drift from the map
+    var wrongCounty = schools.filter(function (s) { return COUNTY_BOROUGH[s.county] !== s.borough; }).length;
+    var sa = schools.filter(function (s) { return s.sa; });
+    var saNotOpen = geo.features.filter(function (f) { return EXCLUDE[String(f.properties.INSTIT_ID)] && /^SUCCESS ACAD/i.test(f.properties.LEGAL_NAME); }).length;
+    var about = { aboutSchools: mainCount, aboutCampuses: total - mainCount, aboutLocations: total, aboutCounty: wrongCounty,
+      aboutSA: sa.length, aboutSA2: sa.length, aboutSANotOpen: saNotOpen, aboutSARecords: sa.filter(function (s) { return !s.isSite; }).length,
+      aboutLeftOff: Object.keys(EXCLUDE).length, aboutMoved: Object.keys(COORD_FIX).length + Object.keys(SITE_FIX).length };
+    Object.keys(about).forEach(function (k) { document.getElementById(k).textContent = about[k]; });
+
+    BOROUGH_ORDER.forEach(function (b) {
+      var n = schools.filter(function (s) { return s.borough === b; }).length;
+      var o = document.createElement('option'); o.value = b; o.textContent = b + ' (' + n + ' locations)'; els.borough.appendChild(o);
+    });
+
+    apply(true);
+  }
+
+  function apply(fit) {
+    var terms = norm(els.q.value).split(' ').filter(Boolean), b = els.borough.value, saOnly = els.saOnly.checked;
+    var hits = schools.filter(function (s) {
+      if (saOnly && !s.sa) return false;
+      if (b && s.borough !== b) return false;
+      for (var i = 0; i < terms.length; i++) if (s.hay.indexOf(terms[i]) === -1) return false;
+      return true;
+    });
+    cluster.clearLayers();
+    saLayer.clearLayers();
+    cluster.addLayers(hits.filter(function (s) { return !s.sa; }).map(function (s) { return s.marker; }));
+    hits.forEach(function (s) { if (s.sa) saLayer.addLayer(s.marker); });
+
+    // The headline stays the citywide count; this line (and Reset) only appears while a search or filter is on
+    els.status.hidden = !(terms.length || b || saOnly);
+    els.count.textContent = hits.length + (hits.length === 1 ? ' location' : ' locations') + ' shown on the map';
+    els.empty.classList.toggle('show', hits.length === 0);
+    if (fit && hits.length) {
+      var wide = window.innerWidth > 640;
+      map.fitBounds(L.latLngBounds(hits.map(function (s) { return [s.lat, s.lon]; })), {
+        paddingTopLeft: [wide ? 360 : 24, wide ? 40 : 220], paddingBottomRight: [24, 24], maxZoom: 15,
+        animate: false  // Leaflet ignores a new view while a zoom animation is running, which left stale views on fast filter changes
+      });
+    }
+  }
+
+  var t;
+  els.q.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { apply(true); }, 150); });
+  els.borough.addEventListener('change', function () { apply(true); });
+  els.saOnly.addEventListener('change', function () { apply(true); });
+  els.reset.addEventListener('click', function () {
+    els.q.value = ''; els.borough.value = ''; els.saOnly.checked = false; apply(true);
+  });
+
+  // collapsible panel on phones
+  function setCollapsed(c) { els.panel.classList.toggle('collapsed', c); els.toggle.setAttribute('aria-expanded', String(!c)); }
+  els.toggle.addEventListener('click', function () { setCollapsed(!els.panel.classList.contains('collapsed')); });
+  if (window.innerWidth <= 640) setCollapsed(true);
+  // Leaflet's auto-pan only knows about the map edges, so before a popup opens, tell it how much of the map the panel covers
+  // (a top band on phones, a left column on desktop). On phones the panel also folds away to make room.
+  function reservePanelSpace(popup) {
+    var phone = window.innerWidth <= 640;
+    if (phone) { setCollapsed(true); els.about.open = false; }
+    var p = els.panel.getBoundingClientRect();
+    popup.options.autoPanPaddingTopLeft = phone ? L.point(12, p.bottom + 8) : L.point(p.right + 12, 12);
+  }
+
+  fetch(DATA_URL).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(load).catch(function (e) {
+    els.topline.textContent = 'Could not load school data.';
+    var d = document.createElement('div'); d.className = 'load-error';
+    d.innerHTML = '<strong>The data file could not be loaded.</strong><br>If you opened <code>index.html</code> straight from disk, browsers block that. ' +
+      'Use the hosted link, or run a local server in this folder (for example <code>ruby -run -e httpd . -p 8000</code>).';
+    document.body.appendChild(d);
+    console.error(e);
+  });
+})();
+</script>
+</body>
+</html>
